@@ -36,7 +36,6 @@ from decimal     import Decimal
 from keyword     import iskeyword
 from struct      import Struct, pack
 from contextlib  import suppress
-from namedlist   import namedlist
 
 
 # Decorator which adds an enum value (an int or a length-one bytes) and its associated
@@ -237,7 +236,25 @@ class serialization:
 
 
     ######## Classes ########
-
+    class _MemberClassGenerator:
+        class _MemberClass:
+            def __init__(self,name,member_names):
+                self.name = name
+                self.member_names = member_names
+                self.values = [None]*len(member_names)
+            def __setitem__(self,n,val):
+                self.values[n] = val
+            def __len__(self):
+                return len(self.member_names)
+            def _asdict(self):
+                d = OrderedDict(_class_name = self.name)
+                d.update(zip(self.member_names,self.values))
+                return d
+        def __init__(self,name,member_names):
+            self.name = name
+            self.member_names = member_names
+        def __call__(self):
+            return self._MemberClass(self.name,self.member_names)
     # Reads a ClassInfo structure, creates a new Python class with the members specified by the
     # ClassInfo, adds it to self._Class_by_id indexed by the ObjectId, and returns the class and id.
     def _read_ClassInfo(self):
@@ -250,7 +267,7 @@ class serialization:
             member_name = make_unique(sanitize_identifier(member_name), unique_members)
             unique_members.add(member_name)
             member_names[member_num] = member_name
-        Class = namedlist(sanitize_identifier(class_name), member_names, default=None)
+        Class = self._MemberClassGenerator(sanitize_identifier(class_name), member_names)
         Class._primitive_types = {}  # filled in below by _read_MemberTypeInfo()
         # Check to see if there is a converter method which can convert this type from a .NET
         # Collection (e.g. an ArrayList or Generic.List) to a native python type, and store it.
@@ -268,7 +285,7 @@ class serialization:
     _AdditionalInfo_readers = ()
 
     def _read_MemberTypeInfo(self, Class):
-        binary_types = [self._read_Byte() for m in Class._fields]  # BinaryTypeEnums
+        binary_types = [self._read_Byte() for m in Class.member_names]  # BinaryTypeEnums
         for member_num, binary_type in enumerate(binary_types):    # AdditionalInfos
             additional_info = self._AdditionalInfo_readers[binary_type](self)
             if binary_type == 0:  # (0 == BinaryTypeEnumeration.Primitive)
@@ -325,9 +342,16 @@ class serialization:
             return self._RecordType_readers[record_type](self)
 
     # Represents an NRBF MemberReference, see _read_MemberReference()
-    _MemberReference = namedlist('_MemberReference', 'id parent index_in_parent resolved', default=None)
+    class _MemberReference:
+        def __init__(self,id=None,parent=None,index_in_parent=None,resolved=None):
+               self.id = id
+               self.parent = parent
+               self.index_in_parent=index_in_parent
+               self.resolved = resolved
+        def _asdict(self):
+               return {'id':self.id,'parent':self.parent,'index_in_parent':self.index_in_parent,'resolved':self.resolved}
 
-    # Reads list elements or members into the 'obj' pre-allocated list or namedlist instance
+    # Reads list elements or members into the 'obj' pre-allocated list or _MemberClass instance
     def _read_members_into(self, obj, object_id, members_primitive_type):
         assert callable(members_primitive_type)  # when called with the member_num, returns any respective primitive type
         if self._add_overwrite_info:
@@ -732,9 +756,7 @@ def read_stream(streamfile):
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if hasattr(o, '_asdict'):
-            d = OrderedDict(_class_name=o.__class__.__name__)  # prepend the class name
-            d.update(o._asdict())
-            return d
+            return o._asdict();
         if isinstance(o, Array):
             return o.tolist()
         if isinstance(o, set):
@@ -746,7 +768,7 @@ class JSONEncoder(json.JSONEncoder):
         return super().default(o)
 
 
-# Returns a version of the identifier suitable to pass to namedlist
+# Returns a sanitized version of the identifier, originaly to be passed to namedlist
 _identifier_re = re.compile('[^a-z0-9_]', flags=re.IGNORECASE)
 def sanitize_identifier(identifier):
     identifier = _identifier_re.sub('_', identifier).lstrip('0123456789_')
