@@ -250,6 +250,8 @@ class serialization:
                 d = OrderedDict(_class_name = self.name)
                 d.update(zip(self.member_names,self.values))
                 return d
+            def __getattr__(self,a):
+                return self.values[self.member_names.index(a)]
         def __init__(self,name,member_names):
             self.name = name
             self.member_names = member_names
@@ -267,7 +269,7 @@ class serialization:
             member_name = make_unique(sanitize_identifier(member_name), unique_members)
             unique_members.add(member_name)
             member_names[member_num] = member_name
-        Class = self._MemberClassGenerator(sanitize_identifier(class_name), member_names)
+        Class = self._MemberClassGenerator(class_name, member_names)
         Class._primitive_types = {}  # filled in below by _read_MemberTypeInfo()
         # Check to see if there is a converter method which can convert this type from a .NET
         # Collection (e.g. an ArrayList or Generic.List) to a native python type, and store it.
